@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text.Json;
 
@@ -7,6 +8,7 @@ namespace MetroMonitor
 {
     class Program
     {
+        static System.Drawing.Point busStop = new System.Drawing.Point(-10000000, 50000000);
         static void Main(string[] args)
         {
             HttpWebRequest wr = (HttpWebRequest)HttpWebRequest.Create(@"https://tripplanner.kingcounty.gov/InfoWeb");
@@ -41,13 +43,36 @@ namespace MetroMonitor
                 streamWriter.Flush();
             }
 
+            MetroResponse resp = null;
             var hr = (HttpWebResponse)wr.GetResponse();
             using (var streamReader = new StreamReader(hr.GetResponseStream()))
             {
-                var responseText = streamReader.ReadToEnd();
-                Console.WriteLine(responseText);
+                resp = JsonSerializer.Deserialize<MetroResponse>(streamReader.ReadToEnd());
             }
+            Alarm(resp);
             hr.Close();
+        }
+
+        public static long Alarm(MetroResponse busState)
+        {
+            int latFenceN = busStop.Y + 4000; //it has left the staging area
+            int latFenceS = busStop.Y + 2000; //too late i missed it
+
+            foreach (int currentLatitude in busState.result.First().RealTimeResults.Select(y => y.Lat).ToArray())
+                if (latFenceN > currentLatitude && currentLatitude > latFenceS)
+                    return getDistance(new System.Drawing.Point(busStop.X, currentLatitude));//Only tracking southbound progress; ignore X component by passing the busStop's X component so they difference to 0
+
+            return -1;
+        }
+
+        public static long getDistance(System.Drawing.Point location)
+        {
+            long deltaX = busStop.X - location.X;
+            long deltaY = busStop.Y - location.Y;
+
+            double answer = Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
+
+            return Convert.ToInt32(answer);
         }
     }
 }
