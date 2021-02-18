@@ -8,7 +8,7 @@ namespace MetroMonitor
 {
     class Program
     {
-        static System.Drawing.Point busStop = new System.Drawing.Point(-10000000, 50000000);
+        static System.Drawing.Point busStop = new System.Drawing.Point(-10000000, 500000);
         static void Main(string[] args)
         {
             HttpWebRequest wr = (HttpWebRequest)HttpWebRequest.Create(@"https://tripplanner.kingcounty.gov/InfoWeb");
@@ -49,14 +49,18 @@ namespace MetroMonitor
             {
                 resp = JsonSerializer.Deserialize<MetroResponse>(streamReader.ReadToEnd());
             }
-            Alarm(resp);
+            Console.WriteLine(Alarm(resp));
             hr.Close();
         }
-
+        /// <summary>
+        /// Check the state of the bus response for any alarm conditions. 
+        /// </summary>
+        /// <param name="busState">MetroResponse from the KCM api</param>
+        /// <returns>-1 if no alarm states present, otherwise it returns the distance to the first bus that satisfies an alarm state</returns>
         public static long Alarm(MetroResponse busState)
         {
-            int latFenceN = busStop.Y + 4000; //it has left the staging area
-            int latFenceS = busStop.Y + 2000; //too late i missed it
+            int latFenceN = busStop.Y + 4000; //it has left the staging area and started moving
+            int latFenceS = busStop.Y + 1000; //too late i missed it
 
             foreach (int currentLatitude in busState.result.First().RealTimeResults.Select(y => y.Lat).ToArray())
                 if (latFenceN > currentLatitude && currentLatitude > latFenceS)
