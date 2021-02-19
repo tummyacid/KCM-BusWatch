@@ -1,15 +1,31 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text.Json;
+using System.Threading;
 
 namespace MetroMonitor
 {
     class Program
     {
-        static System.Drawing.Point busStop = new System.Drawing.Point(-10000000, 500000);
+        private const int gpsMovementThreashold = 500;
+        private static TimeSpan pollingInterval = new TimeSpan(0, 0, 30);
+        static System.Collections.Generic.Dictionary<int, System.Drawing.Point> history = new System.Collections.Generic.Dictionary<int, System.Drawing.Point>();
         static void Main(string[] args)
+        {
+            while (true)
+            {
+                var busState = checkBusStop("1000");
+                Console.WriteLine($"{DateTime.Now}");
+                Alarm(busState);
+                Thread.Sleep(Convert.ToInt32(pollingInterval.TotalMilliseconds));
+            }
+        }
+
+        private static MetroResponse checkBusStop(String aStopId)
         {
             HttpWebRequest wr = (HttpWebRequest)HttpWebRequest.Create(@"https://tripplanner.kingcounty.gov/InfoWeb");
             wr.ContentType = "application/json; charset=utf-8";
@@ -29,7 +45,7 @@ namespace MetroMonitor
                         NumStopTimes = 150,
                         NumTimesPerLine = 10,
                         Radius = "0",
-                        StopId = "1000",
+                        StopId = aStopId,
                         SuppressLinesUnloadOnly = "1"
                     }
                 }
@@ -49,30 +65,42 @@ namespace MetroMonitor
             {
                 resp = JsonSerializer.Deserialize<MetroResponse>(streamReader.ReadToEnd());
             }
-            Console.WriteLine(Alarm(resp));
             hr.Close();
+
+            return resp;
         }
+
         /// <summary>
         /// Check the state of the bus response for any alarm conditions. 
         /// </summary>
         /// <param name="busState">MetroResponse from the KCM api</param>
-        /// <returns>-1 if no alarm states present, otherwise it returns the distance to the first bus that satisfies an alarm state</returns>
-        public static long Alarm(MetroResponse busState)
+        /// <returns>-1 if no alarm states present, otherwise it returns a list of bus Ids that satisfy an alarm state</returns>
+        public static String[] Alarm(MetroResponse busState)
         {
-            int latFenceN = busStop.Y + 4000; //it has left the staging area and started moving
-            int latFenceS = busStop.Y + 1000; //too late i missed it
+            List<String> movingBuses = new List<String>();
 
-            foreach (int currentLatitude in busState.result.First().RealTimeResults.Select(y => y.Lat).ToArray())
-                if (latFenceN > currentLatitude && currentLatitude > latFenceS)
-                    return getDistance(new System.Drawing.Point(busStop.X, currentLatitude));//Only tracking southbound progress; ignore X component by passing the busStop's X component so they difference to 0
-
-            return -1;
+            foreach (var aBus in busState.result.First().RealTimeResults.ToArray())
+            {
+                System.Drawing.Point busPosition = new System.Drawing.Point(aBus.Lon, aBus.Lat);
+                if (!history.ContainsKey(aBus.TripId))
+                    history.Add(aBus.TripId, busPosition);
+                else
+                {
+                    if (getDistance(history[aBus.TripId], busPosition) > gpsMovementThreashold)
+                    {
+                        movingBuses.Add(aBus.VehicleNumber);
+                        Console.WriteLine($"{aBus.VehicleNumber} {getDistance(history[aBus.TripId], busPosition)} away");
+                    }
+                    history[aBus.TripId] = new System.Drawing.Point(aBus.Lon, aBus.Lat);
+                }
+            }
+            return movingBuses.ToArray();
         }
 
-        public static long getDistance(System.Drawing.Point location)
+        public static long getDistance(System.Drawing.Point location1, System.Drawing.Point location2)
         {
-            long deltaX = busStop.X - location.X;
-            long deltaY = busStop.Y - location.Y;
+            long deltaX = location1.X - location2.X;
+            long deltaY = location1.Y - location2.Y;
 
             double answer = Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
 
